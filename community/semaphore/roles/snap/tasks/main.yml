@@ -1,0 +1,66 @@
+---
+# code: language=ansible
+# tasks file for snap
+- name: install snap via apt for debian based systems
+  ansible.builtin.apt:
+    name:
+      - snap
+    state: present
+  become: true
+  become_method: sudo
+  become_user: root
+  when: ansible_os_family == 'Debian'    
+
+- name: install snap via dnf for rhel >8 based systems
+  ansible.builtin.dnf:
+    name:
+      - snap
+    state: present
+  become: true
+  become_method: sudo
+  become_user: root
+  when: ansible_os_family == 'RedHat' and ansible_distribution_major_version >= '8'
+
+- name: install semaphore via snap
+  community.general.snap:
+    name:
+      - semaphore
+    state: present
+  become: true
+  become_method: sudo
+  become_user: root
+
+- name: stop semaphore service to create admin user
+  ansible.builtin.service:
+    name: semaphore
+    state: stopped
+  become: true
+  become_method: sudo
+  become_user: root
+  when: semaphore_create_user | bool | default(false)
+
+- name: create user via shell command
+  ansible.builtin.command:
+    argv:
+      - semaphore
+      - user add 
+      - --admin
+      - "--login={{ semaphore_admin_user_login }}"
+      - "--name={{ semaphore_admin_user_name }}"
+      - "--email={{ semaphore_admin_user_email }}"
+      - "--password={{ semaphore_admin_user_password }}"
+  register: semaphore_user_create_command
+  changed_when: semaphore_user_create_command.rc == 0
+  become: true
+  become_method: sudo
+  become_user: root
+  when: semaphore_create_user | bool | default(false)
+
+- name: start semaphore service after create admin user was created
+  ansible.builtin.service:
+    name: semaphore
+    state: start
+  become: true
+  become_method: sudo
+  become_user: root
+  when: semaphore_create_user | bool | default(false)
