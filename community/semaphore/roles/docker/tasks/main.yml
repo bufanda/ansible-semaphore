@@ -1,8 +1,6 @@
 ---
-# tasks file for docker
----
 # code: language=ansible
-- name: create volume pathes
+- name: Create volume pathes
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
@@ -10,9 +8,14 @@
   loop:
     - "{{ semaphore_database_volume_path }}"
 
+- name: Create a docker network
+  community.docker.docker_network:
+    name:
+      semaphore_net
+
 - name: Start postgres database for semaphore
-  community.docker.docker_container: 
-    name: postgres
+  community.docker.docker_container:
+    name: semaphore_postgres
     restart_policy: unless-stopped
     # published_ports:
     #   - "5432:5432"
@@ -20,17 +23,21 @@
       - "5432"
     image: "postgres:{{ semaphore_postgres_version | default(14) }}"
     hostname: postgres
-    volumes: 
-     - "{{ semaphore_database_volume_path | default('semaphore-postgres') }}:/var/lib/postgresql/data"
-    environment:
-     POSTGRES_USER: "{{ semaphore_database_user | default('semaphore')}}"
-     POSTGRES_PASSWORD: "{{ semaphore_database_password | default('semaphore')}}"
-     POSTGRES_DB: "{{ semaphore_database_name | default('semaphore')}}"
+    volumes:
+      - "{{ semaphore_database_volume_path | default('/volumes/semaphore/postgres') }}:/var/lib/postgresql/data:rw"
+    env:
+      POSTGRES_USER: "{{ semaphore_database_user | default('semaphore') }}"
+      POSTGRES_PASSWORD: "{{ semaphore_database_password | default('semaphore') }}"
+      POSTGRES_DB: "{{ semaphore_database_name | default('semaphore') }}"
+    networks:
+      - name: semaphore_net
+        aliases:
+          - postgres
   when: semaphore_database == 'postgres'
 
 - name: Start mariadb database for semaphore
   community.docker.docker_container:
-    name: mysql
+    name: semaphore_mysql
     restart_policy: unless-stopped
     # published_ports:
     #   - 3306:3306
@@ -40,26 +47,31 @@
     hostname: mysql
     volumes:
       - "{{ semaphore_database_volume_path | default('semaphore-postgres') }}:/var/lib/mysql"
-    environment:
+    env:
       MYSQL_RANDOM_ROOT_PASSWORD: 'yes'
-      MYSQL_DATABASE: "{{ semaphore_database_name | default('semaphore')}}"
-      MYSQL_USER: "{{ semaphore_database_user | default('semaphore')}}"
-      MYSQL_PASSWORD: "{{ semaphore_database_password | default('semaphore')}}"
+      MYSQL_DATABASE: "{{ semaphore_database_name | default('semaphore') }}"
+      MYSQL_USER: "{{ semaphore_database_user | default('semaphore') }}"
+      MYSQL_PASSWORD: "{{ semaphore_database_password | default('semaphore') }}"
+    networks:
+      - name: semaphore_net
+        aliases:
+          - mysql
+  when: semaphore_database == 'mysql'
 
 - name: Start semaphore app container
   community.docker.docker_container:
     name: semaphore
     restart_policy: unless-stopped
     published_ports:
-      - 3000:3000
+      - "{{ semaphore_app_published_port | default('3000:3000') }}"
     image: "semaphoreui/semaphore:{{ semaphore_app_version | default('latest') }}"
-    environment:
-      SEMAPHORE_DB_USER: "{{ semaphore_database_user | default('semaphore')}}"
-      SEMAPHORE_DB_PASS: "{{ semaphore_database_password | default('semaphore')}}"
-      SEMAPHORE_DB_HOST: "{{ 'mysql' if semaphore_database=='mysql' else 'postgres' }}" # for postgres, change to: postgres
-      SEMAPHORE_DB_PORT: "{{ '3306' if semaphore_database=='mysql' else 5432 }}" # change to 5432 for postgres
-      SEMAPHORE_DB_DIALECT: mysql
-      SEMAPHORE_DB: "{{ semaphore_database_name | default('semaphore')}}"
+    env:
+      SEMAPHORE_DB_USER: "{{ semaphore_database_user | default('semaphore') }}"
+      SEMAPHORE_DB_PASS: "{{ semaphore_database_password | default('semaphore') }}"
+      SEMAPHORE_DB_HOST: "{{ 'mysql' if semaphore_database == 'mysql' else 'postgres' }}" # for postgres, change to: postgres
+      SEMAPHORE_DB_PORT: "{{ '3306' if semaphore_database == 'mysql' else '5432' }}" # change to 5432 for postgres
+      SEMAPHORE_DB_DIALECT: "{{ 'mysql' if semaphore_database == 'mysql' else 'postgres' }}"
+      SEMAPHORE_DB: "{{ semaphore_database_name | default('semaphore') }}"
       SEMAPHORE_PLAYBOOK_PATH: /tmp/semaphore/
       SEMAPHORE_ADMIN_PASSWORD: "{{ semaphore_admin_password }}"
       SEMAPHORE_ADMIN_NAME: "{{ semaphore_admin_name }}"
@@ -74,3 +86,7 @@
       SEMAPHORE_LDAP_PASSWORD: "{{ semaphore_ldap_bind_password }}"
       SEMAPHORE_LDAP_DN_SEARCH: "{{ semaphore_ldap_search_dn }}"
       SEMAPHORE_LDAP_SEARCH_FILTER: "{{ semaphore_ldap_search_filter }}"
+    networks:
+      - name: semaphore_net
+        aliases:
+          - semaphore

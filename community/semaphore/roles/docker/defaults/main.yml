@@ -1,2 +1,3 @@
 ---
-# defaults file for docker
+# code: language=ansible
+semaphore_database: postgres
